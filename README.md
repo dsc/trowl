@@ -1,2 +1,2 @@
-# Trowl -- A Python web-scraper framework
+# Trowl - A Python web-scraper framework
 
