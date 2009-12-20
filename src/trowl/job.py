@@ -1,4 +1,6 @@
-import pyres
+import pyres, re, urlparse, urllib2, cookielib
+from urllib2 import build_opener, HTTPCookieProcessor, HTTPRedirectHandler
+from lessly.misc import keystringer
 from trowl.util import pquery 
 
 BASE_HEADERS = {
@@ -21,16 +23,15 @@ class Scraper(object):
     
     
     def __init__(self, url, **env):
+        self.resq = pyres.ResQ()
         self.url = url
+        self._env = env.copy()
         self.env = env
         self.fetch()
         self.process()
     
     def fetch(self):
         "Fetches the url (but does not read from the response)."
-        
-        import urllib2, cookielib
-        from urllib2 import build_opener, HTTPCookieProcessor, HTTPRedirectHandler
         
         self.cookies = cookielib.CookieJar()
         self.opener = build_opener( HTTPCookieProcessor(self.cookies), HTTPRedirectHandler )
@@ -46,6 +47,8 @@ class Scraper(object):
     
     @classmethod
     def perform(Cls, url, env={}):
+        print "perform(cls={Cls}, url={url}, env={env})".format(**locals())
+        env = keystringer(env)
         Cls(url, **env)
     
     def __str__(self):
@@ -61,22 +64,43 @@ class ParsingScraper(Scraper):
         super(ParsingScraper, self).__init__(url, **env)
     
     def process(self):
-        self.dom = pquery.parse(self.request)
-        print self.dom
         super(ParsingScraper, self).process()
+        print "Creating DOM..."
+        self.dom = pquery.parse(self.request)
     
 
 class Spider(ParsingScraper):
     """ A Spider walks the DOM looking for links, 
         and then queues each that passes the filter.
     """
+    filter = None
     
     def __init__(self, url, filter=None, **env):
-        self.filter = filter
-        super(Spider, self).__init__(url, filter=None, **env)
+        if not filter:
+            self.filter = None
+            
+        elif filter.startswith('regex:'):
+            print "Filter from pattern: %s" % filter[6:]
+            self.filter = re.compile(filter[6:]).search
+            
+        elif filter.startswith('class:'):
+            self.filter = pyres.safe_str_to_class(filter[6:])(url, env)
+        
+        super(Spider, self).__init__(url, filter=filter, **env)
     
     def process(self):
-        pass
+        super(Spider, self).process()
+        print "Spidering..."
+        base = self.request.url
+        for el in self.dom('a').iter():
+            url = urlparse.urljoin(base, el.attr('href'))
+            if self.filter is None or self.filter(url):
+                print '  Queuing url: %s' % url
+                self.resq.enqueue(self.__class__, url, self._env)
+            else:
+                print '  Discarding url: %s' % url
+        print "Done Spidering!"
+    
 
 
 
